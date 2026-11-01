@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TP Nº2 - Recreación de señales</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 10px; background: #f5f5f5; }
+    .container { max-width: 1100px; margin: 0 auto; background: white; padding: 15px; border-radius: 5px; }
+    h1 { font-size: 18px; margin: 5px 0 15px 0; text-align: center; }
+    .section { border: 1px solid #ccc; margin: 10px 0; padding: 10px; border-radius: 3px; }
+    .section h2 { font-size: 14px; margin: 0 0 10px 0; background: #eee; padding: 5px; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 5px 0; }
+    label { font-size: 12px; min-width: 80px; }
+    input, select, button { font-size: 12px; padding: 4px; }
+    button { cursor: pointer; padding: 5px 10px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .info { font-size: 11px; background: #f9f9f9; padding: 8px; font-family: monospace; }
+    .warn { color: #d33; font-weight: bold; }
+    .ok { color: #080; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>TP Nº2 - Recreación de señales (ESP32 + Web Serial)</h1>
+    
+    <!-- CONEXIÓN -->
+    <div class="section">
+      <h2>Conexión</h2>
+      <div class="row">
+        <button id="btnConnect">Conectar</button>
+        <button id="btnDisconnect" disabled>Desconectar</button>
+        <label>Baudrate:</label>
+        <select id="selBaud">
+          <option value="115200">115200</option>
+          <option value="460800">460800</option>
+          <option value="921600" selected>921600</option>
+          <option value="1000000">1000000</option>
+        </select>
+        <span id="connStatus">Desconectado</span>
+      </div>
+      <div class="row">
+        <label>Fs pedida:</label>
+        <select id="selFs">
+          <option value="10000">10000 Sa/s</option>
+          <option value="20000" selected>20000 Sa/s</option>
+          <option value="40000">40000 Sa/s</option>
+          <option value="80000">80000 Sa/s</option>
+          <option value="libre">Libre</option>
+        </select>
+        <input type="number" id="inpFsLibre" value="20000" min="1000" max="100000" step="100" style="width:90px" disabled>
+        <button id="btnSendConfig" disabled>Enviar CONFIG</button>
+        <span id="cfgStatus"></span>
+      </div>
+      <div class="info" id="log">Esperando conexión...</div>
+    </div>
+    
+    <!-- SEÑAL -->
+    <div class="section">
+      <h2>Control de señal</h2>
+      <div class="grid">
+        <div>
+          <div class="row">
+            <label>Forma:</label>
+            <select id="selForma">
+              <option value="senoidal" selected>Senoidal</option>
+              <option value="triangular">Triangular</option>
+              <option value="cuadrada">Cuadrada</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Modo freq:</label>
+            <select id="selModoFreq">
+              <option value="libre" selected>Hz libre</option>
+              <option value="N">N muestras/período</option>
+            </select>
+          </div>
+          <div id="modoLibre">
+            <div class="row">
+              <label>f (Hz):</label>
+              <input type="number" id="inpF" value="1000" min="0.01" step="1" style="width:80px">
+              <label>Paso:</label>
+              <input type="number" id="inpPaso" value="1" min="0.01" step="0.01" style="width:60px">
+              <button id="btnFmenos">-</button>
+              <button id="btnFmas">+</button>
+            </div>
+          </div>
+          <div id="modoN" style="display:none">
+            <div class="row">
+              <label>N:</label>
+              <input type="number" id="inpN" value="100" min="2" step="1" style="width:70px">
+              <span id="infoN">f = fs_real/N</span>
+            </div>
+          </div>
+          <div class="row">
+            <span id="warnFreq" class="warn"></span>
+          </div>
+        </div>
+        <div>
+          <div class="row">
+            <label>Amplitud:</label>
+            <input type="range" id="rngAmp" min="0" max="100" value="100" style="width:150px">
+            <input type="number" id="inpAmp" value="100" min="0" max="100" style="width:50px"> %
+          </div>
+          <div class="row">
+            <button id="btnIniciar" disabled>Iniciar</button>
+            <button id="btnDetener" disabled>Detener</button>
+          </div>
+          <div class="row">
+            <button id="btnRampa">Rampa (0-255)</button>
+            <label>Código fijo:</label>
+            <input type="number" id="inpCodigoFijo" value="128" min="0" max="255" style="width:60px">
+            <button id="btnCodigoFijo">Aplicar fijo</button>
+          </div>
+          <div class="row">
+            <label>Ráfaga k:</label>
+            <input type="number" id="inpK" value="10" min="1" max="100" style="width:50px">
+            <button id="btnRafaga">Enviar ráfaga</button>
+            <span id="infoRafaga" style="font-size:10px"></span>
+          </div>
+        </div>
+      </div>
+      <div class="info" style="color:#d33">IMPORTANTE: La pestaña debe permanecer visible. Cerrar Monitor Serie y Serial Plotter antes de usar. Desconectar página antes de cargar firmware.</div>
+    </div>
+    
+    <!-- PANEL INFORMÁTIVO -->
+    <div class="section">
+      <h2>Panel informativo</h2>
+      <div class="grid">
+        <div class="info" id="infoFs">
+Fs_pedida: - | fs_real: - | Error: - ppm / - %
+Muestras/período: - | Frecuencia efectiva: - Hz
+Rango: mín 0.01 Hz | máx teórico fs_real/2: - | máx recomendado fs_real/10: -
+Pasos: modo libre: - Hz | modo N: -
+        </div>
+        <div class="info" id="infoEnlace">
+Fs máx teórica enlace (baud/10)*200/204: - Sa/s
+Ocupación enlace: - %
+Resolución efectiva (amp): niveles: - | bits efectivos: - | bits perdidos: -
+Vpp ideal: - V (VDD editable) | LSB: - V
+        </div>
+      </div>
+      <div class="info" id="infoEsp32">
+Datos ESP32: rx: - | played: - | fill: - / 4096 | und: - | ovr: - | seqerr: - | enviadas: -
+        </div>
+      <div class="row">
+        <label>VDD (V):</label>
+        <input type="number" id="inpVdd" value="3.3" step="0.01" style="width:60px">
+      </div>
+    </div>
+  </div>
+  
+  <script src="muestras.js"></script>
+  <script>
+    // Variables
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let connected = false;
+    let ready = false;
+    let fsReal = 20000;
+    let fsPedida = 20000;
+    let running = false;
+    let enviadas = 0;
+    let seq_global = 0;
+    let bufferTargetMitad = 2048;
+    let esp32Fill = 0;
+    let loopStreaming = false;
+    
+    // Elementos
+    const btnConnect = document.getElementById('btnConnect');
+    const btnDisconnect = document.getElementById('btnDisconnect');
+    const selBaud = document.getElementById('selBaud');
+    const selFs = document.getElementById('selFs');
+    const inpFsLibre = document.getElementById('inpFsLibre');
+    const btnSendConfig = document.getElementById('btnSendConfig');
+    const selForma = document.getElementById('selForma');
+    const selModoFreq = document.getElementById('selModoFreq');
+    const modoLibre = document.getElementById('modoLibre');
+    const modoN = document.getElementById('modoN');
+    const inpF = document.getElementById('inpF');
+    const inpPaso = document.getElementById('inpPaso');
+    const btnFmenos = document.getElementById('btnFmenos');
+    const btnFmas = document.getElementById('btnFmas');
+    const inpN = document.getElementById('inpN');
+    const warnFreq = document.getElementById('warnFreq');
+    const rngAmp = document.getElementById('rngAmp');
+    const inpAmp = document.getElementById('inpAmp');
+    const btnIniciar = document.getElementById('btnIniciar');
+    const btnDetener = document.getElementById('btnDetener');
+    const btnRampa = document.getElementById('btnRampa');
+    const inpCodigoFijo = document.getElementById('inpCodigoFijo');
+    const btnCodigoFijo = document.getElementById('btnCodigoFijo');
+    const inpK = document.getElementById('inpK');
+    const btnRafaga = document.getElementById('btnRafaga');
+    const infoRafaga = document.getElementById('infoRafaga');
+    const inpVdd = document.getElementById('inpVdd');
+    const logDiv = document.getElementById('log');
+    const infoFsDiv = document.getElementById('infoFs');
+    const infoEnlaceDiv = document.getElementById('infoEnlace');
+    const infoEsp32Div = document.getElementById('infoEsp32');
+    const cfgStatus = document.getElementById('cfgStatus');
+    
+    function log(msg) {
+      logDiv.innerHTML = new Date().toLocaleTimeString() + ' - ' + msg + '<br>' + logDiv.innerHTML;
+      if (logDiv.innerHTML.split('<br>').length > 20) {
+        const parts = logDiv.innerHTML.split('<br>');
+        logDiv.innerHTML = parts.slice(0, 20).join('<br>');
+      }
+    }
+    
+    selFs.addEventListener('change', () => {
+      inpFsLibre.disabled = (selFs.value !== 'libre');
+    });
+    
+    selModoFreq.addEventListener('change', () => {
+      if (selModoFreq.value === 'libre') {
+        modoLibre.style.display = 'block';
+        modoN.style.display = 'none';
+      } else {
+        modoLibre.style.display = 'none';
+        modoN.style.display = 'block';
+      }
+      actualizarGenerador();
+    });
+    
+    rngAmp.addEventListener('input', () => {
+      inpAmp.value = rngAmp.value;
+      actualizarGenerador();
+      actualizarPanel();
+    });
+    inpAmp.addEventListener('input', () => {
+      let v = Math.max(0, Math.min(100, parseInt(inpAmp.value) || 0));
+      inpAmp.value = v;
+      rngAmp.value = v;
+      actualizarGenerador();
+      actualizarPanel();
+    });
+    
+    btnFmenos.addEventListener('click', () => {
+      let paso = parseFloat(inpPaso.value) || 1;
+      inpF.value = (parseFloat(inpF.value) - paso).toFixed(3);
+      validarFrecuencia();
+      actualizarGenerador();
+      actualizarPanel();
+    });
+    btnFmas.addEventListener('click', () => {
+      let paso = parseFloat(inpPaso.value) || 1;
+      inpF.value = (parseFloat(inpF.value) + paso).toFixed(3);
+      validarFrecuencia();
+      actualizarGenerador();
+      actualizarPanel();
+    });
+    
+    inpF.addEventListener('change', () => { validarFrecuencia(); actualizarGenerador(); actualizarPanel(); });
+    inpN.addEventListener('change', () => { actualizarGenerador(); actualizarPanel(); });
+    selForma.addEventListener('change', () => { actualizarGenerador(); });
+    
+    btnConnect.addEventListener('click', conectar);
+    btnDisconnect.addEventListener('click', desconectar);
+    btnSendConfig.addEventListener('click', enviarConfig);
+    btnIniciar.addEventListener('click', iniciar);
+    btnDetener.addEventListener('click', detener);
+    btnRampa.addEventListener('click', () => {
+      if (typeof window.iniciarRampa === 'function') window.iniciarRampa();
+      if (typeof window.reiniciarGenerador === 'function') {
+        window.reiniciarGenerador({forma:'rampa', fs: fsReal});
+      }
+      log('Modo RAMPA activado');
+    });
+    btnCodigoFijo.addEventListener('click', () => {
+      const c = Math.max(0, Math.min(255, parseInt(inpCodigoFijo.value)||128));
+      if (typeof window.reiniciarGenerador === 'function') {
+        window.reiniciarGenerador({forma:'fijo', codigo:c, fs: fsReal});
+      }
+      log('Código fijo: ' + c);
+    });
+    btnRafaga.addEventListener('click', enviarRafaga);
+    
+    function actualizarGenerador() {
+      if (typeof window.reiniciarGenerador !== 'function') return;
+      const forma = selForma.value;
+      const modo = selModoFreq.value;
+      const f = parseFloat(inpF.value) || 1000;
+      const N = parseInt(inpN.value) || 100;
+      const amp = parseInt(inpAmp.value) || 100;
+      window.reiniciarGenerador({forma, modo, fs: fsReal, f, N, amp});
+    }
+    
+    function validarFrecuencia() {
+      const f = parseFloat(inpF.value) || 0;
+      warnFreq.textContent = '';
+      if (fsReal > 0 && f >= fsReal/2) {
+        warnFreq.textContent = '¡Error: f >= fs_real/2 no permitido!';
+      } else if (fsReal > 0 && f > fsReal/10) {
+        warnFreq.textContent = 'Advertencia: forma de onda poco reconocible (f > fs_real/10)';
+      }
+    }
+    
+    async function conectar() {
+      if (!('serial' in navigator)) {
+        log('Web Serial no soportado. Usar Chrome/Edge.');
+        return;
+      }
+      try {
+        const baud = parseInt(selBaud.value);
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: baud, dataBits: 8, stopBits: 1, parity: 'none' });
+        // Desactivar DTR/RTS
+        try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch(e){}
+        connected = true;
+        btnConnect.disabled = true;
+        btnDisconnect.disabled = false;
+        document.getElementById('connStatus').textContent = 'Conectado';
+        log('Puerto abierto, esperando READY...');
+        leerSerie();
+        // Esperar READY antes de habilitar
+        setTimeout(() => {
+          ready = true;
+          btnSendConfig.disabled = false;
+          log('Listo para enviar CONFIG');
+        }, 2000);
+      } catch(e) {
+        log('Error: ' + e);
+      }
+    }
+    
+    async function desconectar() {
+      detener();
+      if (reader) { try { await reader.cancel(); } catch(e){} }
+      if (port) { try { await port.close(); } catch(e){} }
+      port = null; connected = false;
+      btnConnect.disabled = false;
+      btnDisconnect.disabled = true;
+      btnSendConfig.disabled = true;
+      btnIniciar.disabled = true;
+      document.getElementById('connStatus').textContent = 'Desconectado';
+      log('Desconectado');
+    }
+    
+    async function leerSerie() {
+      if (!port) return;
+      const textDecoder = new TextDecoderStream();
+      port.readable.pipeTo(textDecoder.writable);
+      reader = textDecoder.readable.getReader();
+      let buffer = '';
+      try {
+        while (true) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          if (value) {
+            buffer += value;
+            let lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (let line of lines) {
+              line = line.replace(/\r/g,'');
+              if (line.trim() === '') continue;
+              if (line.includes('READY')) { log('ESP32: ' + line); }
+              else if (line.includes('CFG')) {
+                log('ESP32: ' + line);
+                // Parsear fs_real
+                const m = line.match(/fs_real=(\d+)/);
+                if (m) {
+                  fsReal = parseInt(m[1]);
+                  cfgStatus.textContent = 'CFG OK, fs_real=' + fsReal;
+                  actualizarGenerador();
+                  actualizarPanel();
+                  btnIniciar.disabled = false;
+                }
+              }
+              else if (line.startsWith('S ')) {
+                actualizarDatosEsp32(line);
+              } else {
+                log('ESP32: ' + line);
+              }
+            }
+          }
+        }
+      } catch(e) {
+        log('Lectura: ' + e);
+      }
+    }
+    
+    function actualizarDatosEsp32(line) {
+      // S rx=... played=... fill=... und=... ovr=... seqerr=...
+      const get = (k) => { const m = line.match(new RegExp(k+'=(\\d+)')); return m ? m[1] : '-'; };
+      const rx = get('rx'), played = get('played'), fill = get('fill'), und = get('und'), ovr = get('ovr'), seqerr = get('seqerr');
+      const fNum = parseInt(fill);
+      if (!isNaN(fNum)) esp32Fill = fNum;
+      document.getElementById('infoEsp32').innerHTML = 
+        'Datos ESP32: rx: ' + rx + ' | played: ' + played + ' | fill: ' + fill + ' / 4096 | und: ' + und + ' | ovr: ' + ovr + ' | seqerr: ' + seqerr + ' | enviadas: ' + enviadas;
+    }
+    
+    async function enviarConfig() {
+      if (!port || !port.writable) return;
+      // Siempre detener antes de cambiar CONFIG
+      detener();
+      await new Promise(r => setTimeout(r, 50));
+      let fs = 20000;
+      if (selFs.value === 'libre') fs = parseInt(inpFsLibre.value) || 20000;
+      else fs = parseInt(selFs.value);
+      fsPedida = fs;
+      // Paquete: 0xA5 0x01 + fs little-endian uint32
+      try {
+        const pkt = new Uint8Array([0xA5, 0x01, fs & 0xFF, (fs>>8)&0xFF, (fs>>16)&0xFF, (fs>>24)&0xFF]);
+        const writerStream = port.writable.getWriter();
+        await writerStream.write(pkt);
+        writerStream.releaseLock();
+        log('Enviado CONFIG fs=' + fs);
+        cfgStatus.textContent = 'Esperando CFG...';
+      } catch(e) {
+        log('Error CONFIG: ' + e);
+      }
+    }
+    
+    function actualizarPanel() {
+      const vdd = parseFloat(inpVdd.value) || 3.3;
+      const fEff = (selModoFreq.value === 'N') ? (fsReal / (parseInt(inpN.value)||100)) : (parseFloat(inpF.value)||0);
+      const mpp = fsReal > 0 ? (fsReal/2).toFixed(0) : '-';
+      const mpr = fsReal > 0 ? (fsReal/10).toFixed(0) : '-';
+      const pasoLibre = inpPaso.value;
+      let pasoN = '-';
+      const Nn = parseInt(inpN.value)||100;
+      if (fsReal>0 && Nn>=2) pasoN = (fsReal/Nn - fsReal/(Nn+1)).toExponential(2);
+      const mppTeor = fsReal>0 ? (fsReal/2) : 0;
+      const errPpm = fsPedida>0 ? ((fsReal-fsPedida)/fsPedida*1000000).toFixed(0) : '-';
+      const errPct = fsPedida>0 ? ((fsReal-fsPedida)/fsPedida*100).toFixed(3) : '-';
+      const mppMuestras = (fsReal>0 && fEff>0) ? (fsReal/fEff).toFixed(1) : '-';
+      infoFsDiv.innerHTML = 
+        'Fs_pedida: ' + fsPedida + ' | fs_real: ' + fsReal + ' | Error: ' + errPpm + ' ppm / ' + errPct + ' %<br>' +
+        'Muestras/período: ' + mppMuestras + ' | Frecuencia efectiva: ' + fEff.toFixed(3) + ' Hz<br>' +
+        'Rango: mín 0.01 Hz | máx teórico fs_real/2: ' + mppTeor + ' Hz | máx recomendado fs_real/10: ' + mpr + ' Hz<br>' +
+        'Pasos: modo libre: ' + pasoLibre + ' Hz | modo N: ' + pasoN + ' Hz';
+      
+      // Enlace
+      const baud = parseInt(selBaud.value);
+      const fsMaxEnlace = (baud/10) * 200 / 204;
+      const ocup = fsReal>0 ? (fsReal/fsMaxEnlace*100).toFixed(1) : '-';
+      const amp = parseInt(inpAmp.value)||100;
+      const niveles = Math.floor(255*amp/100)+1;
+      const bitsEf = Math.log2(niveles).toFixed(2);
+      const bitsPerd = (8 - parseFloat(bitsEf)).toFixed(2);
+      const vppIdeal = (amp/100)*vdd;
+      const lsb = vdd/255;
+      infoEnlaceDiv.innerHTML =
+        'Fs máx teórica enlace (baud/10)*200/204: ' + fsMaxEnlace.toFixed(0) + ' Sa/s<br>' +
+        'Ocupación enlace: ' + ocup + ' %<br>' +
+        'Resolución efectiva (amp): niveles: ' + niveles + ' | bits efectivos: ' + bitsEf + ' | bits perdidos: ' + bitsPerd + '<br>' +
+        'Vpp ideal: ' + vppIdeal.toFixed(3) + ' V (VDD editable) | LSB: ' + lsb.toFixed(6) + ' V';
+      
+      validarFrecuencia();
+    }
+    setInterval(actualizarPanel, 500);
+    
+    async function iniciar() {
+      if (!connected || !port || !port.writable) return;
+      if (running) return;
+      
+      actualizarGenerador();
+      enviadas = 0;
+      esp32Fill = 2000;
+      if (typeof seq_global !== 'undefined') seq_global = 0;
+      running = true;
+      btnIniciar.disabled = true;
+      btnDetener.disabled = false;
+      log('Envío iniciado (pestaña visible)');
+      
+      bucleEnvio();
+    }
+    
+    async function detener() {
+      running = false;
+      btnIniciar.disabled = false;
+      btnDetener.disabled = true;
+      
+      // Esperar que el bucle libere el lock del writer
+      let timeout = 0;
+      while (loopStreaming && timeout < 25) {
+        await new Promise(r => setTimeout(r, 10));
+        timeout++;
+      }
+      
+      // Enviar STOP al ESP32
+      if (connected && port && port.writable) {
+        try {
+          const pkt = new Uint8Array([0xA5, 0x03]);
+          const w = port.writable.getWriter();
+          await w.write(pkt);
+          w.releaseLock();
+        } catch(e) {}
+      }
+      log('Detenido');
+    }
+    
+    async function bucleEnvio() {
+      if (loopStreaming) return;
+      loopStreaming = true;
+      let w = null;
+      try {
+        w = port.writable.getWriter();
+        
+        // 1. Pre-llenado de buffer (~2000 muestras) para garantizar que el DAC nunca sufra underrun inicial
+        const nPre = 200;
+        for (let i = 0; i < 10 && running && connected; i++) {
+          const bloque = window.generarBloque(nPre);
+          const sseq = seq_global++ & 0xFF;
+          const pkt = new Uint8Array(4 + nPre);
+          pkt[0] = 0xA5; pkt[1] = 0x02; pkt[2] = sseq; pkt[3] = nPre;
+          pkt.set(bloque, 4);
+          await w.write(pkt);
+          enviadas += nPre;
+        }
+        
+        // 2. Bucle de streaming continuo con lazo de realimentación (fill)
+        const n = 200;
+        while (running && connected) {
+          if (esp32Fill > 3500) {
+            // Buffer casi lleno, esperar un instante para evitar overrun
+            const fsWait = fsReal > 0 ? fsReal : 40000;
+            const msWait = Math.max(2, Math.round((n / fsWait) * 1000));
+            await new Promise(r => setTimeout(r, msWait));
+            continue;
+          }
+          
+          const bloque = window.generarBloque(n);
+          const sseq = seq_global++ & 0xFF;
+          const pkt = new Uint8Array(4 + n);
+          pkt[0] = 0xA5; pkt[1] = 0x02; pkt[2] = sseq; pkt[3] = n;
+          pkt.set(bloque, 4);
+          await w.write(pkt);
+          enviadas += n;
+          
+          // Calcular cadencia según Fs real (ej. a 40kSa/s, 200 muestras duran 5.0ms)
+          const fs = fsReal > 0 ? fsReal : 40000;
+          const msNominal = (n / fs) * 1000;
+          let delayMs = Math.max(1, Math.round(msNominal - 1));
+          
+          // Lazo cerrado para estabilizar buffer en torno a 2048 muestras
+          if (esp32Fill < 1200) {
+            delayMs = Math.max(1, Math.round(msNominal * 0.7)); // Rellenar 30% más rápido si baja, no a lo loco
+          } else if (esp32Fill > 2600) {
+            delayMs = Math.round(msNominal * 1.3); // Espaciar si supera la mitad
+          }
+          
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+      } catch(e) {
+        log('Error streaming: ' + e);
+      } finally {
+        if (w) {
+          try { w.releaseLock(); } catch(e){}
+        }
+        loopStreaming = false;
+      }
+    }
+    
+    function enviarRafaga() {
+      if (!connected) return;
+      const k = Math.max(1, Math.min(100, parseInt(inpK.value)||10));
+      if (typeof window.iniciarRampa === 'function') window.iniciarRampa();
+      if (typeof window.reiniciarGenerador === 'function') {
+        window.reiniciarGenerador({forma:'rampa', fs: fsReal});
+      }
+      // Enviar k*256 muestras de una vez
+      const total = k * 256;
+      detener();
+      const enviarTodo = async () => {
+        if (!port || !port.writable) return;
+        let sent = 0;
+        while (sent < total) {
+          const n = Math.min(200, total - sent);
+          const bloque = window.generarBloque(n);
+          const seqr = sent & 0xFF;
+          const pkt = new Uint8Array(4 + n);
+          pkt[0] = 0xA5; pkt[1] = 0x02; pkt[2] = seqr; pkt[3] = n;
+          pkt.set(bloque, 4);
+          const w = port.writable.getWriter();
+          await w.write(pkt);
+          w.releaseLock();
+          sent += n;
+          await new Promise(r => setTimeout(r, 2));
+        }
+        log('Ráfaga enviada: ' + total + ' muestras (k=' + k + ')');
+        infoRafaga.textContent = 'Enviadas ' + total + ' muestras. Esperar ' + k + ' inversiones en SYNC, duración ~' + ((k-1)*256/fsReal).toFixed(4) + 's';
+      };
+      enviarTodo();
+    }
+    
+    actualizarPanel();
+  </script>
+</body>
+</html>
